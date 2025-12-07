@@ -122,28 +122,6 @@ def save_to_supabase(title, url, ai_data, source, category):
     except Exception as e:
         print(f"❌ 入库失败: {e}")
 
-def save_to_supabase(title, url, ai_data, source):
-    """
-    现在 ai_data 是一个字典，我们把它拆解存入不同列
-    """
-    # 组合一下 summary 内容，保留之前的格式习惯，把关键数据拼在后面
-    full_summary = f"{ai_data['summary']}\n\n**关键数据:** {ai_data['key_stats']}"
-    
-    data = {
-        "title": title,
-        "url": url,
-        "content_summary": full_summary, # 保持兼容
-        "original_source": source,
-        "sentiment_score": ai_data['sentiment_score'], # 新增：分数
-        "tags": ai_data['tags'] # 新增：标签数组
-    }
-    
-    try:
-        supabase.table("news").insert(data).execute()
-        print(f"✅ 入库成功: {title[:20]}... [分数: {ai_data['sentiment_score']}]")
-    except Exception as e:
-        print(f"❌ 入库失败: {e}")
-
 # ================= 主循环 =================
 
 def run_pipeline():
