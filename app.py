@@ -20,7 +20,7 @@ TRANSLATIONS = {
         "no_news": "📭 该板块暂无最新消息",
         "original_title": "**原标题**",
         "read_more": "🔗 阅读原文",
-        "expand_details": "🔽 展开详情",
+        "expand_details": "展开详情",
         "latest_count": "最新收录",
         "market_sentiment": "当前市场情绪",
         "sentiment_trend": "情绪走势 (近30条)",
@@ -62,7 +62,7 @@ TRANSLATIONS = {
         "no_news": "📭 No recent news in this section",
         "original_title": "**Original Title**",
         "read_more": "🔗 Read More",
-        "expand_details": "🔽 Expand Details",
+        "expand_details": "Expand Details",
         "latest_count": "Latest News",
         "market_sentiment": "Market Sentiment",
         "sentiment_trend": "Sentiment Trend (Last 30)",
@@ -195,28 +195,67 @@ def render_news_list(news):
     for n in news:
         title = n.get('title')
         url = n.get('url')
-        details = n.get('content_summary')
+        full_summary = n.get('content_summary')
+        created_at = n.get('created_at')
+        date_str = created_at.split('T')[0] if created_at else ""
+        score = n.get('sentiment_score')
+        tags = n.get('tags')
         
-        with st.container():
-            st.markdown(f"**{title}**")
+        # 颜色逻辑
+        emoji = "⚪"
+        if score is not None:
+            if score >= 4: emoji = "🟢"
+            elif score <= -4: emoji = "🔴"
+
+        # 1. 提取摘要和详情
+        short_summary = title # 默认回退
+        details_text = full_summary
+        
+        if full_summary:
+            if "**关键数据:**" in full_summary:
+                parts = full_summary.split("**关键数据:**", 1)
+                short_summary = parts[0].strip()
+                details_text = f"{t['key_stats']} {parts[1].strip()}"
+            elif len(full_summary) > 0:
+                short_summary = full_summary
+                details_text = "" # 如果没有关键数据，详情区暂时为空，或者可以放其他信息
+
+        # 2. 翻译摘要 (根据当前语言设置)
+        display_summary = translate_text(short_summary, lang_code)
+        
+        # 3. 处理标签
+        tags_str = ""
+        if tags:
+            tags_str = " ".join([f"#{tag}" for tag in tags])
+
+        # 4. 渲染卡片
+        with st.container(border=True):
+            # 第一行：表情 + 日期
+            st.caption(f"{emoji} {date_str}")
+            
+            # 主文本：显示翻译后的核心摘要 (替代原来的 Title 位置)
+            st.markdown(f"**{display_summary}**")
+            
+            # 标签
+            if tags_str:
+                st.markdown(f"`{tags_str}`")
             
             # 详情折叠区
-            # 这里的 expanded 由 sidebar 控制
             with st.expander(t["expand_details"], expanded=is_expanded):
+                # 里面显示原标题 (带链接)
                 st.markdown(f"{t['original_title']}: [{title}]({url})")
                 
-                # 渲染 Details (支持高亮)
-                if details:
+                # 渲染 Key Stats (支持高亮)
+                if details_text:
                     # 替换 {{...}} 为 HTML 高亮样式 (橙黄色背景)
                     highlighted_details = re.sub(
                         r"\{\{(.*?)\}\}", 
                         r"<span style='background-color: #FFC107; color: black; padding: 2px 6px; border-radius: 4px; font-weight: bold;'>\1</span>", 
-                        details
+                        details_text
                     )
                     st.markdown(highlighted_details, unsafe_allow_html=True)
                 
                 st.link_button(t["read_more"], url)
-            st.divider()
 
 # 2. 在不同的 Tab 里筛选并显示数据
 # 逻辑拆分
