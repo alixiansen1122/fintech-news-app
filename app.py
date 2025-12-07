@@ -54,7 +54,7 @@ def render_news_list(news_items):
 
     for news in news_items:
         title = news['title']
-        summary = news['content_summary']
+        full_summary = news['content_summary']
         url = news['url']
         date_str = news['created_at'].split('T')[0]
         score = news.get('sentiment_score')
@@ -66,10 +66,27 @@ def render_news_list(news_items):
             if score >= 4: emoji = "🟢"
             elif score <= -4: emoji = "🔴"
         
-        with st.expander(f"{emoji} {date_str} | {title}", expanded=True):
-            if tags:
-                st.markdown(" ".join([f"`#{tag}`" for tag in tags]))
-            st.markdown(summary)
+        # 尝试提取一句话摘要（AI生成摘要）
+        # news_cloud.py 中格式为: summary + "\n\n**关键数据:**" + key_stats
+        short_summary = title # 默认使用标题
+        details = full_summary
+        
+        if "\n\n**关键数据:**" in full_summary:
+            parts = full_summary.split("\n\n**关键数据:**", 1)
+            short_summary = parts[0].strip()
+            details = f"**关键数据:** {parts[1].strip()}"
+        
+        # 标签处理
+        tags_str = ""
+        if tags:
+            tags_str = " ".join([f"#{tag}" for tag in tags])
+        
+        # Header: 表情 日期 | 一句话摘要 标签
+        header = f"{emoji} {date_str} | {short_summary} {tags_str}"
+        
+        with st.expander(header, expanded=False):
+            st.markdown(f"**原标题**: [{title}]({url})")
+            st.markdown(details)
             st.link_button("🔗 阅读原文", url)
 
 # 2. 在不同的 Tab 里筛选并显示数据
