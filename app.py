@@ -1,6 +1,6 @@
 import streamlit as st
 from supabase import create_client, Client
-
+import pandas as pd 
 # 页面配置
 st.set_page_config(page_title="AI 金融情报局", page_icon="📈", layout="wide")
 
@@ -78,3 +78,37 @@ else:
             
             # 按钮
             st.link_button("🔗 阅读原文", url)
+st.title("📈 AI 金融情报局 Pro")
+
+# --- 新增功能 1: 市场情绪看板 ---
+
+news_list = get_news() # 获取最新的30-50条数据
+
+if news_list:
+    # 1. 将数据转换为 Pandas DataFrame (表格处理神器)
+    df = pd.DataFrame(news_list)
+    
+    # 2. 处理时间格式
+    df['created_at'] = pd.to_datetime(df['created_at'])
+    df['date'] = df['created_at'].dt.date # 只取日期
+    
+    # 3. 处理分数 (有些旧数据是 None，填充为 0)
+    df['sentiment_score'] = df['sentiment_score'].fillna(0)
+    
+    # 4. 界面布局：上图下文
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("最新收录", f"{len(df)} 条")
+    with col2:
+        # 计算平均情绪
+        avg_score = df['sentiment_score'].mean()
+        delta_color = "normal"
+        if avg_score > 2: delta_color = "inverse" # 绿色
+        elif avg_score < -2: delta_color = "off" # 红色
+        st.metric("当前市场情绪", f"{avg_score:.1f}", delta=f"{avg_score:.1f} 分", delta_color=delta_color)
+    with col3:
+        st.write("情绪走势 (近30条)")
+        # 画一个简单折线图
+        st.line_chart(df[['created_at', 'sentiment_score']].set_index('created_at'), height=100)
+
+    st.divider()
