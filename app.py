@@ -1,6 +1,13 @@
 import streamlit as st
 from supabase import create_client, Client
 import pandas as pd 
+import google.generativeai as genai
+
+# 从 Secrets 读取 Google Key (记得去 Streamlit 后台添加 GOOGLE_API_KEY)
+try:
+    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+except:
+    pass # 如果没配 Key，对话功能就用不了，但不影响主程序
 # 页面配置
 st.set_page_config(page_title="AI 金融情报局", page_icon="📈", layout="wide")
 
@@ -112,3 +119,53 @@ if news_list:
         st.line_chart(df[['created_at', 'sentiment_score']].set_index('created_at'), height=100)
 
     st.divider()
+    # ... (新闻列表渲染完毕后) ...
+
+st.divider()
+st.header("🤖 AI 分析师 (Beta)")
+
+# 初始化聊天记录
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# 显示历史聊天记录
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# 接收用户输入
+if prompt := st.chat_input("问我关于最近新闻的问题... (例如: 最近加密货币市场怎么样?)"):
+    # 1. 显示用户问题
+    st.chat_message("user").markdown(prompt)
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    # 2. 准备上下文 (把最近的 10 条新闻标题和摘要拼起来)
+    # 这里的 news_list 是我们之前从数据库查出来的
+    context_text = ""
+    for n in news_list[:10]: # 只给AI看最近10条，省流量
+        context_text += f"- {n['created_at']}: {n['title']} (Summary: {n['content_summary']})\n"
+
+    # 3. 调用 Gemini 回答
+    try:
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        
+        # 核心 Prompt
+        full_prompt = f"""
+        你是一个基于以下新闻数据的金融助手。
+        
+        【新闻数据库】：
+        {context_text}
+        
+        【用户问题】：{prompt}
+        
+        请根据数据库里的新闻回答。如果新闻里没提到，就说不知道，不要编造。
+        """
+        
+        with st.chat_message("assistant"):
+            stream = model.generate_content(full_prompt, stream=True)
+            response = st.write_stream(stream)
+            
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        
+    except Exception as e:
+        st.error(f"AI 思考超时或出错: {e}")
