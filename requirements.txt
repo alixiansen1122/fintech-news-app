@@ -4,3 +4,5 @@ google-generativeai
 newspaper3k
 lxml_html_clean
 feedparser
+pandas
+google-generativeai
