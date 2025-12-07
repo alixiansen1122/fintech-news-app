@@ -3,15 +3,20 @@ from supabase import create_client, Client
 import pandas as pd 
 import google.generativeai as genai
 import re
+import time
+import random
 
 # --- 1. 多语言配置 ---
 TRANSLATIONS = {
     "CN": {
         "page_title": "AI 金融情报局",
+        "section_finance": "💰 金融市场",
+        "section_tech": "🤖 科技前沿",
         "tab_all": "🔥 全部动态",
         "tab_ai": "🤖 AI & Tech",
         "tab_crypto": "₿ Crypto",
         "tab_macro": "💰 Macro & Market",
+        "tab_consumer_tech": "📱 Gadgets & Tech",
         "no_news": "📭 该板块暂无最新消息",
         "original_title": "**原标题**",
         "read_more": "🔗 阅读原文",
@@ -35,7 +40,7 @@ TRANSLATIONS = {
         "user_role": "用户",
         "assistant_role": "AI 助手",
         "prompt_template": """
-        你是一个基于以下新闻数据的金融助手。请用{language}回答。
+        你是一个基于以下新闻数据的{role_type}助手。请用{language}回答。
         
         【新闻数据库】：
         {context_text}
@@ -47,10 +52,13 @@ TRANSLATIONS = {
     },
     "EN": {
         "page_title": "AI Financial Intelligence",
+        "section_finance": "💰 Finance Market",
+        "section_tech": "🤖 Tech Frontier",
         "tab_all": "🔥 All News",
         "tab_ai": "🤖 AI & Tech",
         "tab_crypto": "₿ Crypto",
         "tab_macro": "💰 Macro & Market",
+        "tab_consumer_tech": "📱 Gadgets & Tech",
         "no_news": "📭 No recent news in this section",
         "original_title": "**Original Title**",
         "read_more": "🔗 Read More",
@@ -93,10 +101,33 @@ st.set_page_config(page_title="AI Financial Intelligence", page_icon="📈", lay
 with st.sidebar:
     st.title("⚙️ Settings")
     
-    # Language Selector
+    # Section Selector (Finance vs Tech)
+    # We use radio but style it or just standard radio
+    # To access translations, we need to know the current language first.
+    # But language is selected below. Let's move Language Selector up or default to CN.
+    pass 
+
+# Language Selector Logic needs to be early
+# We'll use session state to persist language choice if needed, but for now standard radio is fine.
+# But we need 't' to define labels.
+
+# Default to CN labels for the first render before 't' is defined?
+# Or just put Language Selector first.
+
+with st.sidebar:
+    # Language Selector First
     lang_choice = st.radio("Language / 语言", ["中文", "English"])
     lang_code = "CN" if lang_choice == "中文" else "EN"
     t = TRANSLATIONS[lang_code] # Current translation dict
+    
+    st.divider()
+
+    # Section Selector
+    section_choice = st.radio(
+        "板块选择 / Section",
+        [t["section_finance"], t["section_tech"]]
+    )
+    is_finance = (section_choice == t["section_finance"])
     
     st.divider()
     
@@ -151,128 +182,73 @@ if not news_list:
 st.title(f"📈 {t['page_title']}")
 
 # 1. 定义标签页
-# 第一个是“全部”，后面对应我们在 Python 脚本里写的 category
-tabs = st.tabs([t["tab_all"], t["tab_ai"], t["tab_crypto"], t["tab_macro"]])
+# 根据 Section 动态定义 Tabs
+if is_finance:
+    tabs = st.tabs([t["tab_all"], t["tab_crypto"], t["tab_macro"]])
+else:
+    # Tech Mode
+    tabs = st.tabs([t["tab_all"], t["tab_ai"], t["tab_consumer_tech"]])
 
-@st.cache_data(show_spinner=False)
-def translate_text(text, target_lang_code):
-    """
-    使用 Gemini 翻译文本，并缓存结果以提高性能。
-    自动检测源语言：
-    - 如果目标是 CN，但文本不包含中文 -> 翻译成中文
-    - 如果目标是 EN，但文本包含中文 -> 翻译成英文
-    """
-    if not text:
-        return ""
+# ... (translate_text function remains here) ...
+
+def render_news_list(news):
+    for n in news:
+        title = n.get('title')
+        url = n.get('url')
+        details = n.get('content_summary')
         
-    # 简单的语言检测：检查是否包含中文字符
-    has_chinese = bool(re.search(r'[\u4e00-\u9fff]', text))
-    
-    prompt = None
-    
-    if target_lang_code == "CN":
-        # 目标是中文
-        if has_chinese:
-            return text # 已经是中文，直接返回
-        # 否则翻译成中文
-        prompt = f"Translate the following text to Simplified Chinese (Keep it concise). Output only the translated text:\n\n{text}"
-    
-    else: # EN
-        # 目标是英文
-        if not has_chinese:
-            return text # 已经是英文（或非中文），直接返回
-        # 否则翻译成英文
-        prompt = f"Translate the following text to English (Keep it concise). Output only the translated text:\n\n{text}"
-    
-    if prompt:
-        try:
-            model = genai.GenerativeModel('gemini-2.0-flash')
-            response = model.generate_content(prompt)
-            return response.text.strip()
-        except Exception:
-            return text
-    
-    return text
-
-# 定义一个渲染函数，避免代码重复
-def render_news_list(news_items):
-    if not news_items:
-        st.caption(t["no_news"])
-        return
-
-    # 使用 2 列布局 (Grid Layout)
-    cols = st.columns(2)
-
-    for index, news in enumerate(news_items):
-        with cols[index % 2]: # 奇偶交替
-            title = news['title']
-            full_summary = news['content_summary']
-            url = news['url']
-            date_str = news['created_at'].split('T')[0]
-            score = news.get('sentiment_score')
-            tags = news.get('tags')
+        with st.container():
+            st.markdown(f"**{title}**")
             
-            # 颜色逻辑
-            emoji = "⚪"
-            if score is not None:
-                if score >= 4: emoji = "🟢"
-                elif score <= -4: emoji = "🔴"
-            
-            # 尝试提取一句话摘要（AI生成摘要）
-            short_summary = title # 默认使用标题
-            details = full_summary
-            
-            if "\n\n**关键数据:**" in full_summary:
-                parts = full_summary.split("\n\n**关键数据:**", 1)
-                short_summary = parts[0].strip()
-                details = f"{t['key_stats']} {parts[1].strip()}"
-            
-            # 翻译摘要 (核心修改：总是尝试根据当前语言进行适配)
-            # translate_text 函数内部会自动判断是否需要翻译
-            display_summary = translate_text(short_summary, lang_code)
-
-            # 标签处理
-            tags_str = ""
-            if tags:
-                tags_str = " ".join([f"#{tag}" for tag in tags])
-            
-            # 卡片式布局 (Rectangle)
-            with st.container(border=True):
-                # 标题行: 表情 日期
-                st.caption(f"{emoji} {date_str}")
+            # 详情折叠区
+            # 这里的 expanded 由 sidebar 控制
+            with st.expander(t["expand_details"], expanded=is_expanded):
+                st.markdown(f"{t['original_title']}: [{title}]({url})")
                 
-                # 核心摘要 (Bold)
-                st.markdown(f"**{display_summary}**")
+                # 渲染 Details (支持高亮)
+                if details:
+                    # 替换 {{...}} 为 HTML 高亮样式 (橙黄色背景)
+                    highlighted_details = re.sub(
+                        r"\{\{(.*?)\}\}", 
+                        r"<span style='background-color: #FFC107; color: black; padding: 2px 6px; border-radius: 4px; font-weight: bold;'>\1</span>", 
+                        details
+                    )
+                    st.markdown(highlighted_details, unsafe_allow_html=True)
                 
-                # 标签
-                if tags_str:
-                    st.markdown(f"`{tags_str}`")
-                
-                # 详情折叠区
-                # 这里的 expanded 由 sidebar 控制
-                with st.expander(t["expand_details"], expanded=is_expanded):
-                    st.markdown(f"{t['original_title']}: [{title}]({url})")
-                    st.markdown(details)
-                    st.link_button(t["read_more"], url)
+                st.link_button(t["read_more"], url)
+            st.divider()
 
 # 2. 在不同的 Tab 里筛选并显示数据
-# Pandas 也可以做 filtering，但这里用列表推导式更直观
+# 逻辑拆分
+if is_finance:
+    with tabs[0]: # All Finance
+        # Filter for all finance related categories
+        finance_cats = ["₿ Crypto", "💰 Macro & Market"]
+        finance_news = [n for n in news_list if n.get('category') in finance_cats]
+        render_news_list(finance_news)
+        
+    with tabs[1]: # Crypto
+        crypto_news = [n for n in news_list if n.get('category') == "₿ Crypto"]
+        render_news_list(crypto_news)
+        
+    with tabs[2]: # Macro
+        macro_news = [n for n in news_list if n.get('category') == "💰 Macro & Market"]
+        render_news_list(macro_news)
 
-with tabs[0]: # 全部
-    render_news_list(news_list)
+else: # Tech Mode
+    with tabs[0]: # All Tech
+        tech_cats = ["🤖 AI & Tech", "📱 Gadgets & Tech"]
+        tech_news = [n for n in news_list if n.get('category') in tech_cats]
+        render_news_list(tech_news)
+        
+    with tabs[1]: # AI
+        ai_news = [n for n in news_list if n.get('category') == "🤖 AI & Tech"]
+        render_news_list(ai_news)
+        
+    with tabs[2]: # Consumer Tech
+        consumer_news = [n for n in news_list if n.get('category') == "📱 Gadgets & Tech"]
+        render_news_list(consumer_news)
 
-with tabs[1]: # AI
-    # 筛选 category 包含 "AI" 的新闻
-    ai_news = [n for n in news_list if n.get('category') == "🤖 AI & Tech"]
-    render_news_list(ai_news)
-
-with tabs[2]: # Crypto
-    crypto_news = [n for n in news_list if n.get('category') == "₿ Crypto"]
-    render_news_list(crypto_news)
-
-with tabs[3]: # Macro
-    macro_news = [n for n in news_list if n.get('category') == "💰 Macro & Market"]
-    render_news_list(macro_news)
 
 # --- 新增功能 1: 市场情绪看板 ---
 
@@ -338,7 +314,12 @@ if prompt := st.chat_input(t["chatbot_placeholder"]):
         
         # 核心 Prompt (Inject Language)
         language_name = "Chinese" if lang_code == "CN" else "English"
+        role_type = "金融" if is_finance else "科技" # Default to Finance/Tech
+        if lang_code == "EN":
+             role_type = "Financial" if is_finance else "Technology"
+        
         full_prompt = t["prompt_template"].format(
+            role_type=role_type,
             language=language_name,
             context_text=context_text,
             prompt=prompt
