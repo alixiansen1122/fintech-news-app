@@ -33,59 +33,63 @@ def get_news():
     except Exception as e:
         st.error(f"数据库连接失败: {e}")
         return []
-
+# 获取数据
+news_list = get_news()
+if not news_list:
+    st.info("暂无数据，正在抓取中...")
+    st.stop()
 # --- UI 逻辑 ---
 
-with st.sidebar:
-    st.header("🔍 筛选")
-    if st.button("🔄 刷新数据"):
-        st.rerun()
-    st.info("🟢 绿色 = 利好\n🔴 红色 = 利空\n⚪ 灰色 = 中性/旧数据")
+st.title("📈 AI 金融情报局")
 
-st.title("📈 AI 金融情报局 Pro")
-st.markdown("### 实时结构化金融数据流")
+# 1. 定义标签页
+# 第一个是“全部”，后面对应我们在 Python 脚本里写的 category
+tabs = st.tabs(["🔥 全部动态", "🤖 AI & Tech", "₿ Crypto", "💰 Macro & Market"])
 
-news_list = get_news()
+# 定义一个渲染函数，避免代码重复
+def render_news_list(news_items):
+    if not news_items:
+        st.caption("📭 该板块暂无最新消息")
+        return
 
-if not news_list:
-    st.info("暂无数据")
-else:
-    for news in news_list:
-        # 1. 提取数据
+    for news in news_items:
         title = news['title']
         summary = news['content_summary']
         url = news['url']
         date_str = news['created_at'].split('T')[0]
-        
-        # 处理分数 (旧数据可能是 None)
         score = news.get('sentiment_score')
         tags = news.get('tags')
         
-        # 2. 决定颜色图标
-        # 默认灰色
-        emoji = "⚪" 
-        score_display = ""
-        border_color = None # Streamlit目前还不支持动态边框颜色，但我们可以用emoji区分
-        
+        # 颜色逻辑
+        emoji = "⚪"
         if score is not None:
-            score_display = f" [情绪分: {score}]"
-            if score >= 4:
-                emoji = "🟢" # 利好
-            elif score <= -4:
-                emoji = "🔴" # 利空
+            if score >= 4: emoji = "🟢"
+            elif score <= -4: emoji = "🔴"
         
-        # 3. 渲染卡片
-        with st.expander(f"{emoji} {date_str} | {title} {score_display}", expanded=True):
-            # 显示标签
+        with st.expander(f"{emoji} {date_str} | {title}", expanded=True):
             if tags:
-                # 这种写法会生成漂亮的胶囊标签 [AI] [Nvidia]
                 st.markdown(" ".join([f"`#{tag}`" for tag in tags]))
-            
             st.markdown(summary)
-            
-            # 按钮
             st.link_button("🔗 阅读原文", url)
-st.title("📈 AI 金融情报局 Pro")
+
+# 2. 在不同的 Tab 里筛选并显示数据
+# Pandas 也可以做 filtering，但这里用列表推导式更直观
+
+with tabs[0]: # 全部
+    render_news_list(news_list)
+
+with tabs[1]: # AI
+    # 筛选 category 包含 "AI" 的新闻
+    ai_news = [n for n in news_list if n.get('category') == "🤖 AI & Tech"]
+    render_news_list(ai_news)
+
+with tabs[2]: # Crypto
+    crypto_news = [n for n in news_list if n.get('category') == "₿ Crypto"]
+    render_news_list(crypto_news)
+
+with tabs[3]: # Macro
+    macro_news = [n for n in news_list if n.get('category') == "💰 Macro & Market"]
+    render_news_list(macro_news)
 
 # --- 新增功能 1: 市场情绪看板 ---
 

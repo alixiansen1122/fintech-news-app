@@ -12,10 +12,23 @@ GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-RSS_FEEDS = [
-    "https://techcrunch.com/feed/",
-    "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    "https://www.cnbc.com/id/100003114/device/rss/rss.html"
+RSS_CONFIGS = [
+    {
+        "category": "🤖 AI & Tech",
+        "url": "https://techcrunch.com/category/artificial-intelligence/feed/"
+    },
+    {
+        "category": "₿ Crypto",
+        "url": "https://www.coindesk.com/arc/outboundfeeds/rss/"
+    },
+    {
+        "category": "💰 Macro & Market", # 宏观与市场
+        "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664" # CNBC Finance
+    },
+    {
+        "category": "💰 Macro & Market", 
+        "url": "https://feeds.content.dowjones.io/public/rss/mw_topstories" # MarketWatch
+    }
 ]
 
 if not GOOGLE_API_KEY or not SUPABASE_KEY:
@@ -88,6 +101,27 @@ def ai_summarize_structured(title, content):
         # 如果解析失败，返回 None，跳过这条新闻
         return None
 
+# ================= 2. 升级入库函数 =================
+# 增加 category 参数
+def save_to_supabase(title, url, ai_data, source, category):
+    full_summary = f"{ai_data['summary']}\n\n**关键数据:** {ai_data['key_stats']}"
+    
+    data = {
+        "title": title,
+        "url": url,
+        "content_summary": full_summary,
+        "original_source": source,
+        "sentiment_score": ai_data['sentiment_score'],
+        "tags": ai_data['tags'],
+        "category": category  # <--- 新增这一行
+    }
+    
+    try:
+        supabase.table("news").insert(data).execute()
+        print(f"✅ [{category}] 入库成功: {title[:15]}...")
+    except Exception as e:
+        print(f"❌ 入库失败: {e}")
+
 def save_to_supabase(title, url, ai_data, source):
     """
     现在 ai_data 是一个字典，我们把它拆解存入不同列
@@ -113,11 +147,18 @@ def save_to_supabase(title, url, ai_data, source):
 # ================= 主循环 =================
 
 def run_pipeline():
-    print("🚀 启动结构化数据抓取...")
-    for feed_url in RSS_FEEDS:
+    print("🚀 启动分频道抓取...")
+    
+    # 遍历我们配置好的字典列表
+    for config in RSS_CONFIGS:
+        category = config['category']
+        feed_url = config['url']
+        
+        print(f"\n🌊 正在读取频道: {category} ...")
+        
         try:
             feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:5]: # 限制每次每个源抓5条
+            for entry in feed.entries[:3]: # 每个源抓3条，保持轻量
                 url = entry.link
                 
                 if check_if_exists(url):
@@ -128,13 +169,19 @@ def run_pipeline():
                 title, content = get_article_content(url)
                 
                 if content:
-                    print("   🧠 AI 分析中 (JSON模式)...")
-                    # 调用新的结构化分析函数
+                    print(f"   🧠 AI 分析中 ({category})...")
                     ai_data = ai_summarize_structured(title, content)
                     
                     if ai_data:
-                        source = "TechCrunch" if "techcrunch" in feed_url else "CoinDesk"
-                        save_to_supabase(title, url, ai_data, source)
+                        # 简单的来源名称提取
+                        if "cnbc" in feed_url: source = "CNBC"
+                        elif "techcrunch" in feed_url: source = "TechCrunch"
+                        elif "coindesk" in feed_url: source = "CoinDesk"
+                        elif "dowjones" in feed_url: source = "MarketWatch"
+                        else: source = "Web"
+                        
+                        # 传入 category
+                        save_to_supabase(title, url, ai_data, source, category)
                         time.sleep(2)
                         
         except Exception as e:
