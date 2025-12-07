@@ -2,6 +2,7 @@ import streamlit as st
 from supabase import create_client, Client
 import pandas as pd 
 import google.generativeai as genai
+import re
 
 # --- 1. 多语言配置 ---
 TRANSLATIONS = {
@@ -14,6 +15,7 @@ TRANSLATIONS = {
         "no_news": "📭 该板块暂无最新消息",
         "original_title": "**原标题**",
         "read_more": "🔗 阅读原文",
+        "expand_details": "🔽 展开详情",
         "latest_count": "最新收录",
         "market_sentiment": "当前市场情绪",
         "sentiment_trend": "情绪走势 (近30条)",
@@ -24,7 +26,8 @@ TRANSLATIONS = {
         "view_mode_label": "显示模式 / View Mode",
         "view_mode_compact": "精简 (Compact)",
         "view_mode_expanded": "展开 (Full Details)",
-        "theme_info": "💡 提示: 切换深色/浅色模式请在右上角菜单 'Settings' -> 'Theme' 中调整。",
+        "theme_label": "主题 / Theme",
+        "theme_info": "💡 Streamlit 限制：请点击右上角 '⋮' -> 'Settings' -> 'Theme' 切换深色/浅色模式。",
         "key_stats": "**关键数据:**",
         "loading": "暂无数据，正在抓取中...",
         "db_error": "数据库连接失败: ",
@@ -51,6 +54,7 @@ TRANSLATIONS = {
         "no_news": "📭 No recent news in this section",
         "original_title": "**Original Title**",
         "read_more": "🔗 Read More",
+        "expand_details": "🔽 Expand Details",
         "latest_count": "Latest News",
         "market_sentiment": "Market Sentiment",
         "sentiment_trend": "Sentiment Trend (Last 30)",
@@ -61,7 +65,8 @@ TRANSLATIONS = {
         "view_mode_label": "View Mode",
         "view_mode_compact": "Compact",
         "view_mode_expanded": "Full Details",
-        "theme_info": "💡 Tip: Switch Dark/Light mode in top-right menu 'Settings' -> 'Theme'.",
+        "theme_label": "Theme",
+        "theme_info": "💡 Note: Switch Dark/Light mode in top-right menu '⋮' -> 'Settings' -> 'Theme'.",
         "key_stats": "**Key Stats:**",
         "loading": "No data, fetching...",
         "db_error": "Database connection failed: ",
@@ -103,6 +108,9 @@ with st.sidebar:
     is_expanded = (view_mode == t["view_mode_expanded"])
     
     st.divider()
+    
+    # Theme Info (Mock Settings)
+    st.write(f"**{t['theme_label']}**")
     st.info(t["theme_info"])
 
 # 从 Secrets 读取 Google Key (记得去 Streamlit 后台添加 GOOGLE_API_KEY)
@@ -150,23 +158,41 @@ tabs = st.tabs([t["tab_all"], t["tab_ai"], t["tab_crypto"], t["tab_macro"]])
 def translate_text(text, target_lang_code):
     """
     使用 Gemini 翻译文本，并缓存结果以提高性能。
+    自动检测源语言：
+    - 如果目标是 CN，但文本不包含中文 -> 翻译成中文
+    - 如果目标是 EN，但文本包含中文 -> 翻译成英文
     """
-    # 如果目标语言是中文且文本包含中文，或者目标是英文且文本包含英文，可能不需要翻译
-    # 但为了简单准确，这里只做简单的判断：
-    # 假设数据库存的是中文，如果目标是 EN，则翻译。
-    # 如果数据库以后存英文，这里逻辑可能需要优化。
+    if not text:
+        return ""
+        
+    # 简单的语言检测：检查是否包含中文字符
+    has_chinese = bool(re.search(r'[\u4e00-\u9fff]', text))
+    
+    prompt = None
     
     if target_lang_code == "CN":
-        return text # 假设原文是中文，无需翻译
+        # 目标是中文
+        if has_chinese:
+            return text # 已经是中文，直接返回
+        # 否则翻译成中文
+        prompt = f"Translate the following text to Simplified Chinese (Keep it concise). Output only the translated text:\n\n{text}"
     
-    try:
-        model = genai.GenerativeModel('gemini-2.0-flash')
-        response = model.generate_content(
-            f"Translate the following text to English, keep it concise and keep the original meaning. Output only the translated text:\n\n{text}"
-        )
-        return response.text.strip()
-    except Exception:
-        return text
+    else: # EN
+        # 目标是英文
+        if not has_chinese:
+            return text # 已经是英文（或非中文），直接返回
+        # 否则翻译成英文
+        prompt = f"Translate the following text to English (Keep it concise). Output only the translated text:\n\n{text}"
+    
+    if prompt:
+        try:
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            response = model.generate_content(prompt)
+            return response.text.strip()
+        except Exception:
+            return text
+    
+    return text
 
 # 定义一个渲染函数，避免代码重复
 def render_news_list(news_items):
@@ -201,11 +227,9 @@ def render_news_list(news_items):
                 short_summary = parts[0].strip()
                 details = f"{t['key_stats']} {parts[1].strip()}"
             
-            # 翻译摘要 (如果需要)
-            # 注意：大量调用可能会慢，但有 cache 应该还好
-            display_summary = short_summary
-            if lang_code == "EN":
-                 display_summary = translate_text(short_summary, "EN")
+            # 翻译摘要 (核心修改：总是尝试根据当前语言进行适配)
+            # translate_text 函数内部会自动判断是否需要翻译
+            display_summary = translate_text(short_summary, lang_code)
 
             # 标签处理
             tags_str = ""
@@ -226,7 +250,7 @@ def render_news_list(news_items):
                 
                 # 详情折叠区
                 # 这里的 expanded 由 sidebar 控制
-                with st.expander(t["read_more"], expanded=is_expanded):
+                with st.expander(t["expand_details"], expanded=is_expanded):
                     st.markdown(f"{t['original_title']}: [{title}]({url})")
                     st.markdown(details)
                     st.link_button(t["read_more"], url)
