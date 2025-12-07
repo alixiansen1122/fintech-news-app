@@ -3,13 +3,113 @@ from supabase import create_client, Client
 import pandas as pd 
 import google.generativeai as genai
 
+# --- 1. 多语言配置 ---
+TRANSLATIONS = {
+    "CN": {
+        "page_title": "AI 金融情报局",
+        "tab_all": "🔥 全部动态",
+        "tab_ai": "🤖 AI & Tech",
+        "tab_crypto": "₿ Crypto",
+        "tab_macro": "💰 Macro & Market",
+        "no_news": "📭 该板块暂无最新消息",
+        "original_title": "**原标题**",
+        "read_more": "🔗 阅读原文",
+        "latest_count": "最新收录",
+        "market_sentiment": "当前市场情绪",
+        "sentiment_trend": "情绪走势 (近30条)",
+        "chatbot_title": "🤖 AI 分析师 (Beta)",
+        "chatbot_placeholder": "问我关于最近新闻的问题... (例如: 最近加密货币市场怎么样?)",
+        "settings_title": "⚙️ 设置",
+        "language_label": "语言 / Language",
+        "view_mode_label": "显示模式 / View Mode",
+        "view_mode_compact": "精简 (Compact)",
+        "view_mode_expanded": "展开 (Full Details)",
+        "theme_info": "💡 提示: 切换深色/浅色模式请在右上角菜单 'Settings' -> 'Theme' 中调整。",
+        "key_stats": "**关键数据:**",
+        "loading": "暂无数据，正在抓取中...",
+        "db_error": "数据库连接失败: ",
+        "ai_error": "AI 思考超时或出错: ",
+        "user_role": "用户",
+        "assistant_role": "AI 助手",
+        "prompt_template": """
+        你是一个基于以下新闻数据的金融助手。请用{language}回答。
+        
+        【新闻数据库】：
+        {context_text}
+        
+        【用户问题】：{prompt}
+        
+        请根据数据库里的新闻回答。如果新闻里没提到，就说不知道，不要编造。
+        """
+    },
+    "EN": {
+        "page_title": "AI Financial Intelligence",
+        "tab_all": "🔥 All News",
+        "tab_ai": "🤖 AI & Tech",
+        "tab_crypto": "₿ Crypto",
+        "tab_macro": "💰 Macro & Market",
+        "no_news": "📭 No recent news in this section",
+        "original_title": "**Original Title**",
+        "read_more": "🔗 Read More",
+        "latest_count": "Latest News",
+        "market_sentiment": "Market Sentiment",
+        "sentiment_trend": "Sentiment Trend (Last 30)",
+        "chatbot_title": "🤖 AI Analyst (Beta)",
+        "chatbot_placeholder": "Ask me about recent news... (e.g., How is the crypto market?)",
+        "settings_title": "⚙️ Settings",
+        "language_label": "Language",
+        "view_mode_label": "View Mode",
+        "view_mode_compact": "Compact",
+        "view_mode_expanded": "Full Details",
+        "theme_info": "💡 Tip: Switch Dark/Light mode in top-right menu 'Settings' -> 'Theme'.",
+        "key_stats": "**Key Stats:**",
+        "loading": "No data, fetching...",
+        "db_error": "Database connection failed: ",
+        "ai_error": "AI Error: ",
+        "user_role": "User",
+        "assistant_role": "AI Assistant",
+        "prompt_template": """
+        You are a financial assistant based on the following news data. Please answer in {language}.
+        
+        【News Database】：
+        {context_text}
+        
+        【User Question】：{prompt}
+        
+        Answer based on the database. If not mentioned, say you don't know.
+        """
+    }
+}
+
+# 页面配置
+st.set_page_config(page_title="AI Financial Intelligence", page_icon="📈", layout="wide")
+
+# --- Sidebar Settings ---
+with st.sidebar:
+    st.title("⚙️ Settings")
+    
+    # Language Selector
+    lang_choice = st.radio("Language / 语言", ["中文", "English"])
+    lang_code = "CN" if lang_choice == "中文" else "EN"
+    t = TRANSLATIONS[lang_code] # Current translation dict
+    
+    st.divider()
+    
+    # View Mode Selector
+    view_mode = st.radio(
+        t["view_mode_label"], 
+        [t["view_mode_compact"], t["view_mode_expanded"]]
+    )
+    is_expanded = (view_mode == t["view_mode_expanded"])
+    
+    st.divider()
+    st.info(t["theme_info"])
+
 # 从 Secrets 读取 Google Key (记得去 Streamlit 后台添加 GOOGLE_API_KEY)
 try:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 except:
     pass # 如果没配 Key，对话功能就用不了，但不影响主程序
-# 页面配置
-st.set_page_config(page_title="AI 金融情报局", page_icon="📈", layout="wide")
 
 # 读取 Secrets
 try:
@@ -31,63 +131,105 @@ def get_news():
         response = supabase.table("news").select("*").order("created_at", desc=True).limit(30).execute()
         return response.data
     except Exception as e:
-        st.error(f"数据库连接失败: {e}")
+        st.error(f"{t['db_error']}{e}")
         return []
 # 获取数据
 news_list = get_news()
 if not news_list:
-    st.info("暂无数据，正在抓取中...")
+    st.info(t["loading"])
     st.stop()
 # --- UI 逻辑 ---
 
-st.title("📈 AI 金融情报局")
+st.title(f"📈 {t['page_title']}")
 
 # 1. 定义标签页
 # 第一个是“全部”，后面对应我们在 Python 脚本里写的 category
-tabs = st.tabs(["🔥 全部动态", "🤖 AI & Tech", "₿ Crypto", "💰 Macro & Market"])
+tabs = st.tabs([t["tab_all"], t["tab_ai"], t["tab_crypto"], t["tab_macro"]])
+
+@st.cache_data(show_spinner=False)
+def translate_text(text, target_lang_code):
+    """
+    使用 Gemini 翻译文本，并缓存结果以提高性能。
+    """
+    # 如果目标语言是中文且文本包含中文，或者目标是英文且文本包含英文，可能不需要翻译
+    # 但为了简单准确，这里只做简单的判断：
+    # 假设数据库存的是中文，如果目标是 EN，则翻译。
+    # 如果数据库以后存英文，这里逻辑可能需要优化。
+    
+    if target_lang_code == "CN":
+        return text # 假设原文是中文，无需翻译
+    
+    try:
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        response = model.generate_content(
+            f"Translate the following text to English, keep it concise and keep the original meaning. Output only the translated text:\n\n{text}"
+        )
+        return response.text.strip()
+    except Exception:
+        return text
 
 # 定义一个渲染函数，避免代码重复
 def render_news_list(news_items):
     if not news_items:
-        st.caption("📭 该板块暂无最新消息")
+        st.caption(t["no_news"])
         return
 
-    for news in news_items:
-        title = news['title']
-        full_summary = news['content_summary']
-        url = news['url']
-        date_str = news['created_at'].split('T')[0]
-        score = news.get('sentiment_score')
-        tags = news.get('tags')
-        
-        # 颜色逻辑
-        emoji = "⚪"
-        if score is not None:
-            if score >= 4: emoji = "🟢"
-            elif score <= -4: emoji = "🔴"
-        
-        # 尝试提取一句话摘要（AI生成摘要）
-        # news_cloud.py 中格式为: summary + "\n\n**关键数据:**" + key_stats
-        short_summary = title # 默认使用标题
-        details = full_summary
-        
-        if "\n\n**关键数据:**" in full_summary:
-            parts = full_summary.split("\n\n**关键数据:**", 1)
-            short_summary = parts[0].strip()
-            details = f"**关键数据:** {parts[1].strip()}"
-        
-        # 标签处理
-        tags_str = ""
-        if tags:
-            tags_str = " ".join([f"#{tag}" for tag in tags])
-        
-        # Header: 表情 日期 | 一句话摘要 标签
-        header = f"{emoji} {date_str} | {short_summary} {tags_str}"
-        
-        with st.expander(header, expanded=False):
-            st.markdown(f"**原标题**: [{title}]({url})")
-            st.markdown(details)
-            st.link_button("🔗 阅读原文", url)
+    # 使用 2 列布局 (Grid Layout)
+    cols = st.columns(2)
+
+    for index, news in enumerate(news_items):
+        with cols[index % 2]: # 奇偶交替
+            title = news['title']
+            full_summary = news['content_summary']
+            url = news['url']
+            date_str = news['created_at'].split('T')[0]
+            score = news.get('sentiment_score')
+            tags = news.get('tags')
+            
+            # 颜色逻辑
+            emoji = "⚪"
+            if score is not None:
+                if score >= 4: emoji = "🟢"
+                elif score <= -4: emoji = "🔴"
+            
+            # 尝试提取一句话摘要（AI生成摘要）
+            short_summary = title # 默认使用标题
+            details = full_summary
+            
+            if "\n\n**关键数据:**" in full_summary:
+                parts = full_summary.split("\n\n**关键数据:**", 1)
+                short_summary = parts[0].strip()
+                details = f"{t['key_stats']} {parts[1].strip()}"
+            
+            # 翻译摘要 (如果需要)
+            # 注意：大量调用可能会慢，但有 cache 应该还好
+            display_summary = short_summary
+            if lang_code == "EN":
+                 display_summary = translate_text(short_summary, "EN")
+
+            # 标签处理
+            tags_str = ""
+            if tags:
+                tags_str = " ".join([f"#{tag}" for tag in tags])
+            
+            # 卡片式布局 (Rectangle)
+            with st.container(border=True):
+                # 标题行: 表情 日期
+                st.caption(f"{emoji} {date_str}")
+                
+                # 核心摘要 (Bold)
+                st.markdown(f"**{display_summary}**")
+                
+                # 标签
+                if tags_str:
+                    st.markdown(f"`{tags_str}`")
+                
+                # 详情折叠区
+                # 这里的 expanded 由 sidebar 控制
+                with st.expander(t["read_more"], expanded=is_expanded):
+                    st.markdown(f"{t['original_title']}: [{title}]({url})")
+                    st.markdown(details)
+                    st.link_button(t["read_more"], url)
 
 # 2. 在不同的 Tab 里筛选并显示数据
 # Pandas 也可以做 filtering，但这里用列表推导式更直观
@@ -126,16 +268,16 @@ if news_list:
     # 4. 界面布局：上图下文
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("最新收录", f"{len(df)} 条")
+        st.metric(t["latest_count"], f"{len(df)}")
     with col2:
         # 计算平均情绪
         avg_score = df['sentiment_score'].mean()
         delta_color = "normal"
         if avg_score > 2: delta_color = "inverse" # 绿色
         elif avg_score < -2: delta_color = "off" # 红色
-        st.metric("当前市场情绪", f"{avg_score:.1f}", delta=f"{avg_score:.1f} 分", delta_color=delta_color)
+        st.metric(t["market_sentiment"], f"{avg_score:.1f}", delta=f"{avg_score:.1f}", delta_color=delta_color)
     with col3:
-        st.write("情绪走势 (近30条)")
+        st.write(t["sentiment_trend"])
         # 画一个简单折线图
         st.line_chart(df[['created_at', 'sentiment_score']].set_index('created_at'), height=100)
 
@@ -143,7 +285,7 @@ if news_list:
     # ... (新闻列表渲染完毕后) ...
 
 st.divider()
-st.header("🤖 AI 分析师 (Beta)")
+st.header(t["chatbot_title"])
 
 # 初始化聊天记录
 if "messages" not in st.session_state:
@@ -155,7 +297,7 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # 接收用户输入
-if prompt := st.chat_input("问我关于最近新闻的问题... (例如: 最近加密货币市场怎么样?)"):
+if prompt := st.chat_input(t["chatbot_placeholder"]):
     # 1. 显示用户问题
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -170,17 +312,13 @@ if prompt := st.chat_input("问我关于最近新闻的问题... (例如: 最近
     try:
         model = genai.GenerativeModel('gemini-2.0-flash')
         
-        # 核心 Prompt
-        full_prompt = f"""
-        你是一个基于以下新闻数据的金融助手。
-        
-        【新闻数据库】：
-        {context_text}
-        
-        【用户问题】：{prompt}
-        
-        请根据数据库里的新闻回答。如果新闻里没提到，就说不知道，不要编造。
-        """
+        # 核心 Prompt (Inject Language)
+        language_name = "Chinese" if lang_code == "CN" else "English"
+        full_prompt = t["prompt_template"].format(
+            language=language_name,
+            context_text=context_text,
+            prompt=prompt
+        )
         
         with st.chat_message("assistant"):
             stream = model.generate_content(full_prompt, stream=True)
@@ -189,4 +327,4 @@ if prompt := st.chat_input("问我关于最近新闻的问题... (例如: 最近
         st.session_state.messages.append({"role": "assistant", "content": response})
         
     except Exception as e:
-        st.error(f"AI 思考超时或出错: {e}")
+        st.error(f"{t['ai_error']}{e}")
