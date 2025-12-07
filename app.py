@@ -189,7 +189,41 @@ else:
     # Tech Mode
     tabs = st.tabs([t["tab_all"], t["tab_ai"], t["tab_consumer_tech"]])
 
-# ... (translate_text function remains here) ...
+@st.cache_data(show_spinner=False)
+def translate_text(text, target_lang_code):
+    """
+    使用 Gemini 翻译文本，并缓存结果以提高性能。
+    自动检测源语言：
+    - 如果目标是 CN，但文本不包含中文 -> 翻译成中文
+    - 如果目标是 EN，但文本包含中文 -> 翻译成英文
+    """
+    if not text:
+        return ""
+        
+    # 清理摘要中的多余标题 (翻译前也清理一次，以防万一)
+    text = re.sub(r"⚡?\s*\*\*?一句话核心.*?\*\*?\s*", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(r"核心摘要：?", "", text).strip()
+    
+    # 简单的语言检测：检查是否包含中文字符
+    has_chinese = bool(re.search(r'[\u4e00-\u9fff]', text))
+    
+    # 简单的翻译逻辑
+    if target_lang_code == "CN" and not has_chinese:
+        try:
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            response = model.generate_content(f"Translate to Chinese (Simplified): {text}")
+            return response.text.strip()
+        except:
+            return text
+    elif target_lang_code == "EN" and has_chinese:
+        try:
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            response = model.generate_content(f"Translate to English: {text}")
+            return response.text.strip()
+        except:
+            return text
+            
+    return text
 
 def render_news_list(news):
     for n in news:
@@ -219,6 +253,11 @@ def render_news_list(news):
             elif len(full_summary) > 0:
                 short_summary = full_summary
                 details_text = "" # 如果没有关键数据，详情区暂时为空，或者可以放其他信息
+        
+        # 清理摘要中的多余标题 (针对旧数据的特殊处理)
+        # 移除类似 "⚡ **一句话核心 (One-Liner)**" 或 "一句话核心：" 的前缀
+        short_summary = re.sub(r"⚡?\s*\*\*?一句话核心.*?\*\*?\s*", "", short_summary, flags=re.IGNORECASE).strip()
+        short_summary = re.sub(r"核心摘要：?", "", short_summary).strip()
 
         # 2. 翻译摘要 (根据当前语言设置)
         display_summary = translate_text(short_summary, lang_code)
