@@ -201,8 +201,8 @@ def translate_text(text, target_lang_code):
         return ""
         
     # 清理摘要中的多余标题 (翻译前也清理一次，以防万一)
-    text = re.sub(r"⚡?\s*\*\*?一句话核心.*?\*\*?\s*", "", text, flags=re.IGNORECASE).strip()
-    text = re.sub(r"核心摘要：?", "", text).strip()
+    # text = re.sub(r"⚡?\s*\*\*?一句话核心.*?\*\*?\s*", "", text, flags=re.IGNORECASE).strip()
+    # text = re.sub(r"核心摘要：?", "", text).strip()
     
     # 简单的语言检测：检查是否包含中文字符
     has_chinese = bool(re.search(r'[\u4e00-\u9fff]', text))
@@ -256,8 +256,8 @@ def render_news_list(news):
         
         # 清理摘要中的多余标题 (针对旧数据的特殊处理)
         # 移除类似 "⚡ **一句话核心 (One-Liner)**" 或 "一句话核心：" 的前缀
-        short_summary = re.sub(r"⚡?\s*\*\*?一句话核心.*?\*\*?\s*", "", short_summary, flags=re.IGNORECASE).strip()
-        short_summary = re.sub(r"核心摘要：?", "", short_summary).strip()
+        # short_summary = re.sub(r"⚡?\s*\*\*?一句话核心.*?\*\*?\s*", "", short_summary, flags=re.IGNORECASE).strip()
+        # short_summary = re.sub(r"核心摘要：?", "", short_summary).strip()
 
         # 2. 翻译摘要 (根据当前语言设置)
         display_summary = translate_text(short_summary, lang_code)
