@@ -226,6 +226,10 @@ def translate_text(text, target_lang_code):
     return text
 
 def render_news_list(news):
+    if not news:
+        st.info(t["no_news"])
+        return
+
     for n in news:
         title = n.get('title')
         url = n.get('url')
@@ -273,7 +277,11 @@ def render_news_list(news):
             st.caption(f"{emoji} {date_str}")
             
             # 主文本：显示翻译后的核心摘要 (替代原来的 Title 位置)
-            st.markdown(f"**{display_summary}**")
+            # 避免双重加粗 (如果原文已经包含加粗标记)
+            if display_summary.strip().startswith("**") or "**" in display_summary[:10]:
+                 st.markdown(display_summary)
+            else:
+                 st.markdown(f"**{display_summary}**")
             
             # 标签
             if tags_str:
